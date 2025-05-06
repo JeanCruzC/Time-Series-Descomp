@@ -10,16 +10,16 @@ st.set_page_config(page_title='Análisis Automático de Series Temporales', layo
 st.title('📊 Análisis Automático de Series Temporales')
 
 # Subida de datos
-file = st.file_uploader('Sube un archivo CSV o Excel con tu serie temporal', type=['csv','xlsx'])
-if not file:
+data_file = st.file_uploader('Sube un archivo CSV o Excel con tu serie temporal', type=['csv','xlsx'])
+if not data_file:
     st.info('Por favor, sube tu archivo para iniciar el análisis.')
     st.stop()
 
 # Carga de datos
 try:
-    df = pd.read_csv(file)
+    df = pd.read_csv(data_file)
 except:
-    df = pd.read_excel(file)
+    df = pd.read_excel(data_file)
 st.write('### Datos originales')
 st.dataframe(df.head())
 
@@ -57,7 +57,7 @@ default_period = {'H':24, 'D':7, 'T':60, 'S':60, 'W':52}
 period = default_period.get(freq_letter, 7)
 st.success(f'Periodo estacional estimado: **{period}**')
 
-# Descomposición
+# Descomposición de la serie
 decomp = seasonal_decompose(df[val_col], model='additive', period=period)
 st.subheader('🔍 Descomposición de la serie')
 fig, axes = plt.subplots(4,1,figsize=(10,8),sharex=True)
@@ -68,8 +68,21 @@ axes[3].plot(decomp.resid);    axes[3].set_title('Residuo')
 plt.tight_layout()
 st.pyplot(fig)
 
-# Suavizado automático (media móvil)
-df['Smoothed'] = df[val_col].rolling(window=period, center=True, min_periods=1).mean()
+# Control de nivel de suavizado (slicer)
+st.subheader('⚙️ Ajusta el nivel de suavizado')
+nivel = st.slider('Nivel de suavizado (0=sin suavizado, 1=recomendado, >1=sobre-suavizado)', 0.0, 3.0, 1.0, 0.1)
+window = max(1, int(period * nivel))
+st.markdown(f'- Ventana de suavizado: **{window}** periodos')
+
+# Aplicar suavizado (media móvil)
+df['Smoothed'] = df[val_col].rolling(window=window, center=True, min_periods=1).mean()
+
+# Métrica de suavizado: reducción de volatilidad\std_orig = df[val_col].std()
+std_smooth = df['Smoothed'].std()
+reduction = (1 - std_smooth/std_orig) * 100
+st.markdown(f'- **Reducción de volatilidad**: {reduction:.1f}%')
+
+# Gráfico Original vs Smoothed
 st.subheader('📈 Original vs Smoothed')
 fig2, ax2 = plt.subplots(figsize=(10,4))
 ax2.plot(df[val_col], label='Original')
@@ -78,47 +91,42 @@ ax2.set_title('Serie vs Suavizado')
 ax2.legend()
 st.pyplot(fig2)
 
-# Detección de outliers y limpieza
+# Detección y eliminación de outliers
+st.subheader('🚫 Eliminación de outliers')
 df['z_score'] = zscore(df[val_col].fillna(method='ffill'))
 threshold = 3
 df_clean = df[np.abs(df['z_score']) < threshold]
-st.subheader('🚫 Serie sin Outliers')
 fig3, ax3 = plt.subplots(figsize=(10,4))
 ax3.plot(df_clean[val_col], label='Cleaned')
-ax3.set_title('Outliers Eliminados')
+ax3.set_title('Serie sin Outliers')
 st.pyplot(fig3)
 
-# Resumen ejecutivo
-max_val = df[val_col].max()
-max_time = df[val_col].idxmax()
+# Resumen ejecutivo y alertas de picos
 avg_val = df[val_col].mean()
-std_val = df[val_col].std()
-st.subheader('📝 Resumen Ejecutivo')
-st.markdown(f"- **Máximo**: {max_val:.2f} en {max_time}")
-st.markdown(f"- **Promedio**: {avg_val:.2f}")
-st.markdown(f"- **Desviación estándar**: {std_val:.2f}")
-
-# Alertas de picos
+std_val = std_orig
 thresh_peak = avg_val + 2*std_val
 peaks = df[df[val_col] > thresh_peak]
+st.subheader('📝 Resumen Ejecutivo')
+st.markdown(f'- Valor máximo: **{df[val_col].max():.2f}**')
+st.markdown(f'- Valores por encima de umbral ({thresh_peak:.2f}): **{len(peaks)}**')
+st.markdown(f'- Reducción de volatilidad: **{reduction:.1f}%**')
+
 st.subheader('⚠️ Alertas de Picos')
 if peaks.empty:
     st.write('No se detectaron picos críticos.')
 else:
-    st.write(f'Se detectaron {len(peaks)} picos (>{thresh_peak:.2f}):')
-    st.dataframe(peaks[[val_col]])
-    # Gráfico de picos señalados
+    st.write(peaks[[val_col]])
     fig4, ax4 = plt.subplots(figsize=(10,4))
     ax4.plot(df[val_col], label='Original')
     ax4.scatter(peaks.index, peaks[val_col], color='red', label='Picos')
-    ax4.set_title('Picos detectados en la serie')
+    ax4.set_title('Picos detectados')
     ax4.legend()
     st.pyplot(fig4)
 
-# Exportar
+# Exportar resultados
 export_df = df_clean.copy()
 export_df['Smoothed'] = df['Smoothed']
 export_df['Peak'] = df[val_col] > thresh_peak
 st.subheader('💾 Exportar Resultados')
 csv = export_df.reset_index()[[date_col, val_col, 'Smoothed', 'Peak']].to_csv(index=False).encode('utf-8')
-st.download_button('Descargar CSV con Peaks', csv, 'serie_con_peaks.csv', 'text/csv')
+st.download_button('Descargar CSV con resultados', csv, 'serie_resultados.csv', 'text/csv')
