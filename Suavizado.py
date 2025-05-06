@@ -10,20 +10,20 @@ st.set_page_config(page_title='Análisis Automático de Series Temporales', layo
 st.title('📊 Análisis Automático de Series Temporales')
 
 # Subida de datos
-data_file = st.file_uploader('Sube un archivo CSV o Excel con tu serie temporal', type=['csv','xlsx'])
-if not data_file:
+file = st.file_uploader('Sube un archivo CSV o Excel con tu serie temporal', type=['csv','xlsx'])
+if not file:
     st.info('Por favor, sube tu archivo para iniciar el análisis.')
     st.stop()
 
 # Carga de datos
 try:
-    df = pd.read_csv(data_file)
+    df = pd.read_csv(file)
 except:
-    df = pd.read_excel(data_file)
+    df = pd.read_excel(file)
 st.write('### Datos originales')
 st.dataframe(df.head())
 
-# Detección automática de columna de fecha
+# Detectar columna de fecha
 date_col = None
 for col in df.columns:
     try:
@@ -38,7 +38,7 @@ if date_col is None:
 st.success(f'Columna de fecha detectada: **{date_col}**')
 df = df.set_index(date_col).sort_index()
 
-# Detección automática de columna de valor
+# Detectar columna de valor numérico
 ts_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 if not ts_cols:
     st.error('No se encontró columna numérica de valores.')
@@ -46,12 +46,12 @@ if not ts_cols:
 val_col = ts_cols[0]
 st.success(f'Columna de valor detectada: **{val_col}**')
 
-# Inferencia de frecuencia y ajuste
+# Inferir frecuencia y ajustar
 freq = pd.infer_freq(df.index) or df.index.inferred_freq or 'D'
 df = df.asfreq(freq)
 st.success(f'Frecuencia inferida: **{freq}**')
 
-# Estimación de periodo estacional
+# Estimar periodo estacional
 freq_letter = ''.join(filter(str.isalpha, freq))
 default_period = {'H':24, 'D':7, 'T':60, 'S':60, 'W':52}
 period = default_period.get(freq_letter, 7)
@@ -68,18 +68,18 @@ axes[3].plot(decomp.resid);    axes[3].set_title('Residuo')
 plt.tight_layout()
 st.pyplot(fig)
 
-# Control de nivel de suavizado (slicer)
+# Ajuste de suavizado
 st.subheader('⚙️ Ajusta el nivel de suavizado')
-nivel = st.slider('Nivel de suavizado (0=sin suavizado, 1=recomendado, >1=sobre-suavizado)', 0.0, 3.0, 1.0, 0.1)
+nivel = st.slider('Nivel de suavizado (0=sin,1=recomendado,>1=sobre-suavizado)', 0.0, 3.0, 1.0, 0.1)
 window = max(1, int(period * nivel))
 st.markdown(f'- Ventana de suavizado: **{window}** periodos')
-
 # Aplicar suavizado (media móvil)
 df['Smoothed'] = df[val_col].rolling(window=window, center=True, min_periods=1).mean()
 
-# Métrica de suavizado: reducción de volatilidad\std_orig = df[val_col].std()
+# Calcular métricas de volatilidad
+std_orig = df[val_col].std()
 std_smooth = df['Smoothed'].std()
-reduction = (1 - std_smooth/std_orig) * 100
+reduction = (1 - std_smooth / std_orig) * 100
 st.markdown(f'- **Reducción de volatilidad**: {reduction:.1f}%')
 
 # Gráfico Original vs Smoothed
@@ -91,35 +91,36 @@ ax2.set_title('Serie vs Suavizado')
 ax2.legend()
 st.pyplot(fig2)
 
-# Detección y eliminación de outliers
-st.subheader('🚫 Eliminación de outliers')
+# Eliminar outliers
 df['z_score'] = zscore(df[val_col].fillna(method='ffill'))
 threshold = 3
 df_clean = df[np.abs(df['z_score']) < threshold]
+st.subheader('🚫 Serie sin Outliers')
 fig3, ax3 = plt.subplots(figsize=(10,4))
 ax3.plot(df_clean[val_col], label='Cleaned')
-ax3.set_title('Serie sin Outliers')
+ax3.set_title('Outliers Eliminados')
 st.pyplot(fig3)
 
 # Resumen ejecutivo y alertas de picos
 avg_val = df[val_col].mean()
-std_val = std_orig
-thresh_peak = avg_val + 2*std_val
+st_val = std_orig
+thresh_peak = avg_val + 2 * st_val
 peaks = df[df[val_col] > thresh_peak]
 st.subheader('📝 Resumen Ejecutivo')
-st.markdown(f'- Valor máximo: **{df[val_col].max():.2f}**')
-st.markdown(f'- Valores por encima de umbral ({thresh_peak:.2f}): **{len(peaks)}**')
-st.markdown(f'- Reducción de volatilidad: **{reduction:.1f}%**')
+st.markdown(f'- **Máximo**: {df[val_col].max():.2f} en {df[val_col].idxmax()}')
+st.markdown(f'- **Valores > umbral ({thresh_peak:.2f})**: {len(peaks)}')
+st.markdown(f'- **Reducción de volatilidad**: {reduction:.1f}%')
 
 st.subheader('⚠️ Alertas de Picos')
 if peaks.empty:
     st.write('No se detectaron picos críticos.')
 else:
     st.write(peaks[[val_col]])
+    # Gráfico de picos
     fig4, ax4 = plt.subplots(figsize=(10,4))
     ax4.plot(df[val_col], label='Original')
     ax4.scatter(peaks.index, peaks[val_col], color='red', label='Picos')
-    ax4.set_title('Picos detectados')
+    ax4.set_title('Picos Detectados')
     ax4.legend()
     st.pyplot(fig4)
 
@@ -129,4 +130,4 @@ export_df['Smoothed'] = df['Smoothed']
 export_df['Peak'] = df[val_col] > thresh_peak
 st.subheader('💾 Exportar Resultados')
 csv = export_df.reset_index()[[date_col, val_col, 'Smoothed', 'Peak']].to_csv(index=False).encode('utf-8')
-st.download_button('Descargar CSV con resultados', csv, 'serie_resultados.csv', 'text/csv')
+st.download_button('Descargar CSV', csv, 'serie_resultados.csv', 'text/csv')
